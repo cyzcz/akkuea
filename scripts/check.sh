@@ -122,6 +122,7 @@ ROOT_DEPS='^(package\.json|bun\.lock)$'
 SHARED_PATHS="^apps/shared/|$ROOT_DEPS|^\.github/workflows/shared-ci\.yml$"
 API_PATHS="^apps/api/|$ROOT_DEPS|^\.github/workflows/api-ci\.yml$"
 WEBAPP_PATHS="^apps/webapp/|$ROOT_DEPS|^\.github/workflows/webapp-ci\.yml$"
+LAND_PATHS="^apps/akkuea-land/|^apps/shared/|$ROOT_DEPS|^\.github/workflows/land-ci\.yml$"
 MONOREPO_PATHS="^(apps|docs|scripts|\.github)/|$ROOT_DEPS"
 CONTRACTS_PATHS='^apps/contracts/|^\.github/workflows/contracts-ci\.yml$'
 
@@ -133,6 +134,7 @@ if [ "$MODE" = "fix" ]; then
     run apps/api "prettier (api)" bunx prettier --write "src/**/*.{ts,json}"
     run apps/shared "prettier (shared)" bunx prettier --write .
     run apps/webapp "prettier (webapp)" bunx prettier --write "src/**/*.{ts,tsx,js,jsx,json,css}"
+    run apps/akkuea-land "prettier (akkuea-land)" bunx prettier --write "src/**/*.{ts,tsx}"
   fi
   run apps/contracts "cargo fmt (contracts)" cargo fmt --all
   echo
@@ -280,6 +282,18 @@ if touched "$WEBAPP_PATHS" && need bun "https://bun.sh" "webapp"; then
   else
     SKIPPED+=("webapp: Playwright end-to-end tests (run with E2E=1 make check)")
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Akkuea Land - Quality and Build CI (land-ci.yml)
+
+if touched "$LAND_PATHS" && need bun "https://bun.sh" "akkuea-land"; then
+  build_shared
+  run apps/akkuea-land "akkuea-land: type check" bun run type-check
+  run apps/akkuea-land "akkuea-land: lint" bun run lint
+  run apps/akkuea-land "akkuea-land: format check" bunx prettier --check "src/**/*.{ts,tsx}"
+  run apps/akkuea-land "akkuea-land: tests" bun test
+  run apps/akkuea-land "akkuea-land: production build" bun run build
 fi
 
 # ---------------------------------------------------------------------------

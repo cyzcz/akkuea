@@ -88,7 +88,7 @@ Full breakdown, diagrams, and data flows: [`docs/architecture/system-architectur
 
 ## Before considering a task complete
 
-Every GitHub Actions workflow that runs on a pull request must pass, no exceptions (see [`CONTRIBUTING.md`](CONTRIBUTING.md#cicd-workflows-must-pass)). Before saying a change is done, run this from the repository root and fix everything it reports until it passes:
+Every GitHub Actions workflow that runs on a pull request (`monorepo-ci.yml`, `api-ci.yml`, `webapp-ci.yml`, `land-ci.yml`, `shared-ci.yml`, `contracts-ci.yml`) must pass, no exceptions (see [`CONTRIBUTING.md`](CONTRIBUTING.md#cicd-workflows-must-pass)). Before saying a change is done, run this from the repository root and fix everything it reports until it passes:
 
 ```bash
 make check
