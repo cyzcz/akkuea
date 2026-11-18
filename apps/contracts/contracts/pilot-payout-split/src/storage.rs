@@ -33,6 +33,10 @@ pub enum DataKey {
     /// prove it never spends another holder's reserved funds.
     TotalWithheld,
     PendingAdmin,
+    /// Cumulative rounding dust retained across executed cycles and not yet
+    /// swept via `release_dust`. Stored in instance storage alongside
+    /// `TotalWithheld` so tracking it adds zero ledger footprint entries.
+    TotalDust,
 }
 
 pub struct Storage;
@@ -178,5 +182,18 @@ impl Storage {
 
     pub fn clear_pending_admin(env: &Env) {
         env.storage().instance().remove(&DataKey::PendingAdmin);
+    }
+
+    /// Cumulative rounding dust currently retained in this contract across
+    /// executed cycles and not yet released via `release_dust`.
+    pub fn total_dust(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalDust)
+            .unwrap_or(0)
+    }
+
+    pub fn set_total_dust(env: &Env, amount: i128) {
+        env.storage().instance().set(&DataKey::TotalDust, &amount);
     }
 }

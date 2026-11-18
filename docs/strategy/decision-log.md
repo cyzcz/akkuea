@@ -250,6 +250,19 @@ verified rather than merely written.
 
 Project renamed from the working title "Pili" to **Akkuea** (spelled letter-by-letter: A-K-K-U-E-A, double K) partway through this strategy's development.
 
+## Rounding-dust accounting and release path (pilot-payout-split, #1332)
+
+**Adopted: track rounding dust in an instance-storage running total (`TotalDust`, read via `accumulated_dust`) and sweep it on demand via an admin-gated `release_dust` call to the stored `platform_fee_recipient`.**
+
+**What was considered:** carrying each cycle's integer-division remainder into the next cycle's `holder_amount` so holders absorb prior-cycle dust automatically.
+
+**Why running-total tracking plus explicit release was chosen over next-cycle carry-over:**
+
+1. **Deterministic per-cycle economics.** Under the running-total policy, every cycle's `platform_fee` (`total_income * 10 / 100`) and `holder_amount` (`total_income - platform_fee`) depend solely on that cycle's approved `total_income`, never on historical remainders from earlier cycles. An investor auditing a cycle's `DistributionSummary` sees exact, self-contained arithmetic.
+2. **No stranded final-cycle dust after `exit`.** Carrying dust into the next cycle still leaves the final cycle's rounding dust permanently trapped in the contract once `exit` terminates the pilot, because no subsequent cycle can ever execute. An explicit `release_dust` entrypoint (deliberately permitted while paused or after `exit`, symmetric to `claim_withheld`) lets the contract reach an exact zero balance at wind-down.
+3. **Zero ledger-footprint overhead.** Storing `TotalDust` in instance storage alongside `TotalWithheld` adds zero ledger footprint entries to `execute_distribution`, preserving the ten-holder Soroban mainnet footprint budget.
+4. **Strict isolation from `TotalWithheld` and no arbitrary drain target.** Both `execute_distribution` and `release_dust` guard `TotalWithheld` with checked arithmetic (`usdc.balance(contract) >= amount + total_withheld` before any transfer), zero `TotalDust` before transferring (`NothingToRelease` when zero, preventing double release), and route released dust exclusively to the initialized `PlatformFeeRecipient` rather than a caller-supplied address. Releasing dust is gated by `admin` alone for the same recoverability reason as admin succession: after an ally exit (`ContractExited`), requiring the departed ally's co-signature to sweep sub-cent rounding dust would recreate the stranded-dust problem.
+
 ## Documentation standard
 
 All downstream artifacts (architecture docs, API references, UX specs, pitch materials) are held to a professional bar: clearly structured, precisely defined, illustrated with proper diagrams rather than prose-only descriptions. A standing requirement, not a one-time pass - see `product-brief.md`.

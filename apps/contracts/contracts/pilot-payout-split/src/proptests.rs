@@ -133,8 +133,16 @@ mod tests {
             // 3. The fee is always exactly the documented rounding rule applied to 10% of total income - no drift.
             assert_eq!(summary.platform_fee, total_income * 10 / 100);
 
-            // 4. Every unit of the remainder is accounted for: distributed amounts plus any rounding dust sum back to the exact remainder, nothing is silently created or destroyed.
-            assert_eq!(summary.platform_fee + total_distributed + summary.dust, summary.total_income);
+            // 4. Every unit of the remainder is accounted for: fee + paid + withheld + dust equals total_income,
+            // and accumulated_dust equals the cycle's dust prior to any release.
+            assert_eq!(
+                summary.platform_fee
+                    + summary.distributed_total
+                    + summary.undistributed_failed_swaps
+                    + summary.dust,
+                summary.total_income
+            );
+            assert_eq!(s.payout.accumulated_dust(), summary.dust);
 
             // 5. Distribution is monotonic in holder balance: a holder with a strictly larger balance never receives a strictly smaller payout than a holder with a smaller balance, all else equal.
             // We can verify this by checking the final balances of the holders.
@@ -152,6 +160,88 @@ mod tests {
                         assert!(pay1 >= pay2, "Monotonicity violated: balance {} got payout {} while smaller balance {} got payout {}", bal1, pay1, bal2, pay2);
                     }
                 }
+            }
+        }
+
+        #[test]
+        fn fuzz_multi_cycle_dust_and_withheld_conservation(
+            incomes in prop::collection::vec(1i128..10_000_000i128, 1..=4),
+            balances in prop::collection::vec(1i128..10_000_000i128, 1..=6),
+            eurc_mask in prop::collection::vec(any::<bool>(), 6),
+            release_flags in prop::collection::vec(any::<bool>(), 4),
+        ) {
+            let s = setup_with_balance_values(&balances);
+            let initial = s.usdc.balance(&s.payout_id);
+            if initial > 0 {
+                s.usdc.burn(&s.payout_id, &initial);
+            }
+
+            // Opt selected holders into EURC with an empty router pool so failed EURC legs
+            // exercise withheld accounting alongside rounding dust simultaneously.
+            for (i, &is_eurc) in eurc_mask.iter().enumerate().take(balances.len()) {
+                if is_eurc {
+                    let h = s.holders.get(i as u32).unwrap();
+                    s.payout.set_currency_preference(&h, &crate::Currency::Eurc);
+                }
+            }
+
+            let mut cumulative_dust_generated = 0i128;
+            let mut cumulative_dust_released = 0i128;
+            let mut cumulative_withheld = 0i128;
+            let mut fee_recipient_expected = 0i128;
+
+            for (idx, &inc) in incomes.iter().enumerate() {
+                s.usdc.mint(&s.payout_id, &inc);
+                let cname = std::format!("mc-{}", idx);
+                let cid = cycle(&s.env, &cname);
+                s.payout.record_evidence(
+                    &s.operator,
+                    &s.ally,
+                    &cid,
+                    &evidence_hash(&s.env),
+                    &String::from_str(&s.env, "ipfs://mc"),
+                    &inc,
+                );
+
+                let summary = match s.payout.try_execute_distribution(
+                    &s.operator,
+                    &s.ally,
+                    &cid,
+                    &TEST_MIN_RATE,
+                ) {
+                    Ok(Ok(sum)) => sum,
+                    _ => return Ok(()),
+                };
+
+                // Extended conservation invariant per cycle:
+                // fee + paid + withheld + dust == total_income
+                assert_eq!(
+                    summary.platform_fee
+                        + summary.distributed_total
+                        + summary.undistributed_failed_swaps
+                        + summary.dust,
+                    summary.total_income
+                );
+
+                cumulative_dust_generated += summary.dust;
+                cumulative_withheld += summary.undistributed_failed_swaps;
+                fee_recipient_expected += summary.platform_fee;
+
+                if release_flags[idx] && s.payout.accumulated_dust() > 0 {
+                    let released = s.payout.release_dust(&s.admin);
+                    cumulative_dust_released += released;
+                    fee_recipient_expected += released;
+                }
+
+                // Tracked dust always equals sum of every cycle's dust minus what was released.
+                let expected_unreleased_dust = cumulative_dust_generated - cumulative_dust_released;
+                assert_eq!(s.payout.accumulated_dust(), expected_unreleased_dust);
+                assert_eq!(s.payout.total_withheld_balance(), cumulative_withheld);
+                assert_eq!(s.usdc.balance(&s.fee_recipient), fee_recipient_expected);
+                assert_eq!(
+                    s.usdc.balance(&s.payout_id),
+                    cumulative_withheld + expected_unreleased_dust
+                );
             }
         }
     }
